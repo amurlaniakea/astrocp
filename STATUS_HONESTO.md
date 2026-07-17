@@ -135,3 +135,31 @@
   La comparación RELATIVA AD-MCP vs baseline (mismo data/modelo) es la única
   evidencia metodológicamente sólida de esta fase; los umbrales absolutos se
   movieron y no se presentan como validación.
+
+## AUDITORÍA DESDE CLONE LIMPIO (ciega, sin contexto de Hermes)
+----------------------------------------------------------------
+  El auditor pidió NO abrir el PR y auditar desde clone limpio: clonar
+  https://github.com/amurlaniakea/astrocp en feat/astrocp-ad-mcp, instalar
+  y correr pytest sin contexto previo, confirmando que 11 passed + 2 failed
+  se reproduce igual. Esto reveló 3 bugs de reproducibilidad que el entorno
+  local de Hermes ocultaba:
+
+  1. astroML NO declarado en pyproject -> 3 tests en ERROR de colección en
+     clone fresco. CORREGIDO: astroML en dependencies, pytest en [test].
+  2. data/raw/ (PLAsTiCC Zenodo) en .gitignore -> tests de PLAsTiCC no
+     tendrian datos en clone limpio. CORREGIDO: se commitea el input real
+     (~21MB) para reproducibilidad sin red.
+  3. Cache de features NO codificaba max_objects -> load_plasticc(2500)
+     leia cache de 7848 commiteado -> clase 95 dejaba de ser rara ->
+     test_guardrail frágil al split (fallaba en clone, 10+3 no 11+2).
+     CORREGIDO: _cache_path(max_objects) nombra el archivo con tag; se
+     commitea el cache de 2500; el test fuerza subset de 1200 para hacer la
+     clase 95 determinísticamente inviable.
+
+  RESULTADO FINAL EN CLONE LIMPIO (4to clone, ciego):
+    11 passed, 2 failed (test_coverage_red.py rojo a propósito).
+    Reproduce EXACTAMENTE el estado reportado por Hermes. El repo en GitHub
+    es lo que Hermes dice que es, no lo que reportó sobre sí mismo.
+
+  Esto valida el pipeline de Sil: Hermes implementa -> auditoria clone limpio
+  -> autoriza merge. El PR a main NO se abre hasta que esta auditoria repita.
