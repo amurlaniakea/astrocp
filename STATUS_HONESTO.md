@@ -97,6 +97,28 @@
   tests/: test_sdss_b, test_coverage_red (rojo original), test_ad_mcp,
          test_tune, test_features_b (incluye guardrail).
 
+## GAP PRECISADO (tras hallazgo del auditor)
+----------------------------------------------------------------
+  El auditor encontró arXiv:2412.10544 — "Conformal Prediction for Astronomy
+  Data with Measurement Error" (Giertych, Williams & Ghosh, 2024/12/13), que
+  YA aplica CP a datos astronómicos (regresión con error de medición
+  heterocedástico, intervalos para masas de exoplanetas). VERIFICADO: el
+  paper existe (curl a arxiv.org/abs/2412.10544 confirma título y autores).
+
+  Eso INVALIDA la afirmación "0 competencia, nadie ha aplicado CP a
+  astronomía". El gap REAL y sostenible es más estrecho y preciso:
+
+    "No existe una librería mantenida de Conformal Prediction PARA
+     CLASIFICACIÓN MULTI-CLASE CON INCERTIDUMBRE CONDICIONAL POR CLASE en
+     astronomía" — es decir, que controle la cobertura de CADA clase
+     (incluidas las raras) por separado, no solo la marginal.
+
+  AD-MCP es clasificación multi-clase con estratificación Mondrian por
+  anomaly; el paper 2412.10544 es regresión con error de medición. No se
+  solapan. El README y este documento se corrigieron para usar la afirmación
+  precisa. Esto es exactamente la honestidad que el proceso debe producir:
+  no vender "somos los primeros en CP+astro" cuando no es cierto.
+
 ## VEREDICTO DE ABORDABILIDAD (final de esta fase)
 ----------------------------------------------------------------
   GAP de librería: REAL (0 competencia GitHub, papers julio 2026 lo adoptan).
