@@ -37,14 +37,13 @@ de ejecución y debe seguir ROJO contra el criterio original.
 Usa la API real corregida (SplitConformalClassifier confidence_level,
 conformity_score='raps', fit->conformalize->predict_set).
 """
-import numpy as np
 import pytest
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
 from mapie.classification import SplitConformalClassifier
 from astrocp.datasets.sdss import load_sdss_bpt
-from astrocp.strata.ad_mcp import (ADMCP, conditional_coverage_by_class,
+from astrocp.strata.ad_mcp import (conditional_coverage_by_class,
                                    marginal_coverage)
 
 Xy = pytest.lazy_fixture if False else None  # placeholder no-op

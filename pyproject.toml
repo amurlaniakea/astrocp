@@ -13,7 +13,7 @@ authors = [{ name = "Pedro Sordo Martínez", email = "amurlaniakea@gmail.com" }]
 dependencies = ["mapie==1.4.1", "scikit-learn", "numpy", "pandas", "astropy", "scipy", "astroML"]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "ruff"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

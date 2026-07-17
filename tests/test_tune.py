@@ -26,9 +26,7 @@ Valida que select_lambda:
 
 NO afirma qué lambda debe salir (evitar mover postes de nuevo).
 """
-import numpy as np
 import pytest
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
 from astrocp.datasets.sdss import load_sdss_bpt

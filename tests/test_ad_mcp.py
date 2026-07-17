@@ -30,7 +30,6 @@ el gap de librería es real, el método funciona (ver test_sdss_b.py), y el
 límite en PLAsTiCC es de features (Opción A del plan: ingeniería de features
 de curva de luz).
 """
-import numpy as np
 import pytest
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
