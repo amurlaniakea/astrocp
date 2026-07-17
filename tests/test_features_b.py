@@ -84,23 +84,36 @@ def test_guardrail_n_min_clase_delega_a_global(plasticc_forma):
     estratificar). Si el guardrail está bien implementado, ambas usan la
     misma idea (un solo cuantil sin estratificar) -> deben coincidir. Una
     brecha grande indicaría bug en _q_global o en su aplicación en predict_set.
+
+    Para que la clase 95 sea determinísticamente inviable (no depende del
+    split), se fuerza un subset pequeño (max_objects=1200): clase 95 queda
+    con <30 muestras en calibración, activando el guardrail. Así el test no
+    es frágil al conteo de un split concreto.
     """
     from mapie.classification import SplitConformalClassifier
     X, y, X_tr, X_te, y_tr, y_te = plasticc_forma
-    # AD-MCP con guardrail
+    # subset pequeño para garantizar clase 95 inviable por conteo
+    idx95 = np.where(y_tr == 95)[0]
+    # tomar 1200 objetos del train manteniendo stratificación aproximada
+    rng = np.random.RandomState(0)
+    take = rng.choice(len(X_tr), 1200, replace=False)
+    Xs, ys = X_tr[take], y_tr[take]
+
     m = ADMCP(estimator=RandomForestClassifier(n_estimators=80, random_state=0, n_jobs=-1),
               alpha=0.1, conformity_score="raps", n_bins=5, n_min_class=30, random_state=0)
-    m.fit_conformalize(X_tr, y_tr)
+    m.fit_conformalize(Xs, ys)
     diag = m.diagnose()
-    assert diag["n_inviable"] > 0, "esperaba clases inviables con PLAsTiCC 2500"
+    # con subset de 1200, la clase 95 debe tener <30 en calib -> inviable
+    n95 = diag["class_counts_cal"].get(95, 999)
+    assert n95 < 30, f"clase 95 debía tener <30 en calib (subset 1200), llegó {n95}"
     assert diag["inviable_classes"].get(95, False) is True, (
-        f"clase 95 (16 en calib) debía ser inviable: {diag['class_counts_cal'].get(95)}")
-    _, ys = m.predict_set(X_te)
-    cc_ad = conditional_coverage_by_class(y_te, ys)
+        f"clase 95 ({n95} en calib) debía ser inviable")
+    _, ysg = m.predict_set(X_te)
+    cc_ad = conditional_coverage_by_class(y_te, ysg)
 
     # baseline puro (mismo SplitConformalClassifier del resto de comparaciones)
     Xtr, Xcal, ytr, ycal = train_test_split(
-        X_tr, y_tr, test_size=0.5, random_state=0, stratify=y_tr)
+        Xs, ys, test_size=0.5, random_state=0, stratify=ys)
     base = SplitConformalClassifier(
         estimator=RandomForestClassifier(n_estimators=80, random_state=0, n_jobs=-1),
         prefit=False, confidence_level=0.9, conformity_score="raps")
@@ -113,10 +126,8 @@ def test_guardrail_n_min_clase_delega_a_global(plasticc_forma):
     cov_95_ad = cc_ad[95]
     cov_95_base = cc_base[95]
     print(f"\n[b] guardrail: clase 95 AD-MCP(con guardrail)={cov_95_ad:.3f} "
-          f"vs baseline puro={cov_95_base:.3f}")
-    print(f"[b]   n_inviable={diag['n_inviable']} "
-          f"conteos<30={ {int(k):v for k,v in diag['class_counts_cal'].items() if v<30} }")
-    # el guardrail debe acercar la clase 95 al baseline (misma idea: cuantil global)
+          f"vs baseline puro={cov_95_base:.3f} (n95_cal={n95})")
+    print(f"[b]   n_inviable={diag['n_inviable']}")
     assert abs(cov_95_ad - cov_95_base) <= 0.15, (
         f"guardrail no delega bien a global: clase 95 AD-MCP={cov_95_ad:.3f} "
         f"vs baseline={cov_95_base:.3f} (brecha >0.15 -> bug en _q_global)")
