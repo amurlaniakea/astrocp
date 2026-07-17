@@ -31,25 +31,58 @@
               92:0.806, 95:0.238)
     baseline: marginal 0.925 | peor clase 0.440
 
-  HALLAZGO HONESTO: con features ricas, el BASELINE Mondrian global
-  (peor 0.440) SUPERA a AD-MCP estratificado (peor 0.238). VARIAS clases raras
-  mejoran mucho vs 6-feat (clase 6: 0.45->0.684, 64: 0.46->0.667, 92:
-  0.73->0.806), pero la clase 95 (n~30) sigue en 0.238.
+  HALLAZGO HONESTO: con features ricas, el BASELINE (SplitConformalClassifier
+  con RAPS, cuantil GLOBAL sin estratificar) (peor 0.440) SUPERA a AD-MCP
+  estratificado por anomaly (peor 0.238). VARIAS clases raras mejoran mucho vs
+  6-feat (clase 6: 0.45->0.684, 64: 0.46->0.667, 92: 0.73->0.806), pero la
+  clase 95 sigue en 0.238.
 
-  INTERPRETACIÓN METODOLÓGICA: AD-MCP ayuda en el régimen donde el modelo base
-  deja colas mal calibradas (SDSS moderado, PLAsTiCC 6-feat débil). Cuando las
-  features son ricas y el modelo base ya separa bien, el baseline global puede
-  superar al estratificado por anomaly — porque en PLAsTiCC las clases raras
-  NO viven en el "anomaly tail" con features de forma. AD-MCP NO es
-  universalmente superior; es una herramienta de régimen.
+  NOTA DE TERMINOLOGÍA (señalada por el auditor): "Mondrian global" es
+  contradictorio — Mondrian ES la estratificación condicional; el baseline es
+  conformalización GLOBAL sin estratificar (un único cuantil), lo opuesto a
+  Mondrian. El framing correcto no es "un Mondrian le gana a otro Mondrian",
+  es "conformalización global sin estratificar le gana a AD-MCP estratificado
+  por anomaly score".
+
+  CORRECCIÓN CAUSAL (diagnóstico de muestras, igual que clase 64): la clase 95
+  tiene solo 16 muestras en CALIB total, repartidas 2/1/3/3/7 por estrato de
+  anomaly. Cuantiles por estrato de 1-7 muestras = RUIDO PURO. Esto NO mide
+  fallo conceptual de AD-MCP; mide que no hay señal para calibrar ningún
+  cuantil estratificado. La clase 64 tiene aún menos (7 en calib: 6/1/0/0/0).
+  Por contraste, la clase 92 (que SÍ mejoró a 0.806) tiene 23 muestras en
+  calib, todas en un estrato -> cuantil de 23 muestras, robusto.
+
+  CONCLUSIÓN CORRECTA: no es "AD-MCP es herramienta de régimen que no aplica
+  aquí". Es "AD-MCP necesita un mínimo N de muestras por clase para ser
+  viable; con clases de 16-30 en calib, CUALQUIER estratificación (por
+  anomaly o por otra variable) es inviable por falta de señal, no por
+  criterio de estratificación incorrecto". Eso cambia el producto: el paquete
+  debe tener un GUARDRAIL explícito (n_min por CLASE, no solo por estrato)
+  que diga "con esta clase no hay datos para AD-MCP, usá baseline global".
+
+## GUARDRAIL IMPLEMENTADO (pedido por auditoría)
+----------------------------------------------------------------
+  ADMCP ahora calcula en fit_conformalize el conteo de calibración por clase
+  y marca inviables las que tienen < n_min_class (default 30). En predict_set,
+  esas clases usan el cuantil GLOBAL (no el por-estrato ruidoso). Método
+  diagnose() reporta el desglose: class_counts_cal, inviable_classes, n_inviable.
+  Esto es un producto más honesto que "funciona a veces": el paquete avisa
+  cuándo NO debe usar estratificación por falta de datos.
+
+  Diagnóstico clase 95 (PLAsTiCC 2500, 36 feat): 16 muestras en calib,
+  repartidas 2/1/3/3/7 por estrato -> inviable, delegada a global.
+  Diagnóstico clase 64: 7 en calib (6/1/0/0/0) -> inviable.
+  Diagnóstico clase 92 (mejoró a 0.806): 23 en calib, todas en un estrato
+  -> cuantil robusto. Confirma que el límite es de MUESTRAS, no de método.
 
 ## QUÉ SE IMPLEMENTÓ
 ----------------------------------------------------------------
   src/astrocp/datasets/plasticc.py  loader features de forma (36 dims, cache csv.gz).
   src/astrocp/strata/tune.py         select_lambda por CV.
-  src/astrocp/strata/ad_mcp.py       ADMCP (Mondrian manual, RAPS por anomaly).
+  src/astrocp/strata/ad_mcp.py       ADMCP (Mondrian manual, RAPS por anomaly) +
+                                     GUARDRAIL n_min_class + diagnose().
   tests/: test_sdss_b, test_coverage_red (rojo original), test_ad_mcp,
-         test_tune.
+         test_tune, test_features_b (incluye guardrail).
 
 ## VEREDICTO DE ABORDABILIDAD (final de esta fase)
 ----------------------------------------------------------------
@@ -58,11 +91,11 @@
   favorable (SDSS; PLAsTiCC 6-feat débil). Con features ricas el baseline
   global puede superarlo (régimen donde anomaly no aísla clases raras).
   lambda: fijado por CV objetivo (reproducible), no mágico.
-  Conclusión honesta para el paquete: astrocp debe EXPONER ambos modos
-  (AD-MCP estratificado y Mondrian global) y dejar elegir según el régimen,
-  documentando cuándo cada uno aplica. No vender AD-MCP como panacea.
+  GUARDRAIL n_min_class: AD-MCP delega a cuantil global las clases inviables
+  (< n_min_class en calib) en vez de usar estratos ruidosos. El paquete avisa
+  cuándo NO debe estratificar. No vender AD-MCP como panacea.
 
 ## REPRODUCIBILIDAD
-  venv /home/sil/astrocp/.venv · pip install -e . · pytest -> 7 passed + 2 failed
+  venv /home/sil/astrocp/.venv · pip install -e . · pytest -> 11 passed + 2 failed
   Datos: PLAsTiCC (lightcurves) en data/raw; SDSS astroML local.
   Cache features: data/processed/plasticc_features.csv.gz (no commiteado).

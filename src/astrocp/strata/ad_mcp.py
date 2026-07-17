@@ -92,7 +92,7 @@ class ADMCP:
     def __init__(self, estimator=None, alpha: float = 0.1,
                  conformity_score: str = "raps", method: str = "isolation_forest",
                  n_bins: int = 4, n_min: int = 30, lambda_reg: float = 0.01,
-                 random_state: int = 0):
+                 n_min_class: int = 30, random_state: int = 0):
         from sklearn.ensemble import RandomForestClassifier
         if estimator is None:
             estimator = RandomForestClassifier(
@@ -104,6 +104,7 @@ class ADMCP:
         self.n_bins = n_bins
         self.n_min = n_min
         self.lambda_reg = lambda_reg
+        self.n_min_class = n_min_class
         self.random_state = random_state
         self._strata_seen = None
 
@@ -142,6 +143,19 @@ class ADMCP:
         scores_cal = _raps_scores(proba, ycal, self._class_to_idx,
                                   lambda_reg=self.lambda_reg,
                                   include_last_label=True)
+
+        # GUARDRAIL (pedido por auditoría): conteo de calibración por clase.
+        # Si una clase tiene < n_min_class muestras en calib, CUALQUIER
+        # estratificación (por anomaly o por otra variable) es inviable por
+        # falta de señal -> se marca inviable y se usa el cuantil GLOBAL para
+        # ella en predict_set (delegación a conformalización no estratificada).
+        self._class_counts_cal = {int(c): int((ycal == c).sum()) for c in self._classes}
+        self._inviable_classes = {int(c): (cnt < self.n_min_class)
+                                  for c, cnt in self._class_counts_cal.items()}
+
+        # cuantil GLOBAL (fallback para clases inviables)
+        self._q_global = float(np.quantile(scores_cal, 1 - self.alpha * (len(scores_cal) + 1) / len(scores_cal)))
+
         self._quantiles = {}
         for s in np.unique(str_cal):
             mask = str_cal == s
@@ -152,6 +166,19 @@ class ADMCP:
             q = float(np.quantile(sc, 1 - self.alpha * (n + 1) / n))
             self._quantiles[s] = q
         return self
+
+    def diagnose(self) -> dict:
+        """Reporte de guardrail: conteo de calib por clase y viabilidad de
+        AD-MCP para cada una. Útil para decidir si usar AD-MCP o baseline."""
+        if not hasattr(self, "_class_counts_cal"):
+            raise RuntimeError("fit_conformalize() debe llamarse antes de diagnose()")
+        return {
+            "n_min_class": self.n_min_class,
+            "class_counts_cal": dict(self._class_counts_cal),
+            "inviable_classes": {int(c): bool(v)
+                                 for c, v in self._inviable_classes.items()},
+            "n_inviable": int(sum(self._inviable_classes.values())),
+        }
 
     def predict_set(self, X: np.ndarray) -> tuple:
         """Predice conjuntos usando el cuantil Mondrian del bin de anomaly.
@@ -171,10 +198,17 @@ class ADMCP:
         y_pred = np.zeros(len(X), dtype=int)
         for i in range(len(X)):
             s = sX[i]
-            q = self._quantiles.get(s, self._quantiles.get(self._fallback_stratum(), np.inf))
-            incl = scores[i] <= q
-            idxs = np.where(incl)[0]
-            y_set[i, idxs] = 1
+            q_stratum = self._quantiles.get(
+                s, self._quantiles.get(self._fallback_stratum(), np.inf))
+            for c in range(K):
+                # GUARDRAIL: clases inviables (pocas muestras en calib) usan
+                # el cuantil GLOBAL, no el por-estrato ruidoso.
+                if self._inviable_classes.get(int(self._classes[c]), False):
+                    q = self._q_global
+                else:
+                    q = q_stratum
+                if scores[i, c] <= q:
+                    y_set[i, c] = 1
             y_pred[i] = int(self._classes[np.argmax(proba[i])])
         return y_pred, y_set
 
