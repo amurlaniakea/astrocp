@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrocp"
+version = "0.1.0"
+description = "Conformal prediction with anomaly-stratified coverage for astronomical surveys"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Pedro Sordo Martínez", email = "amurlaniakea@gmail.com" }]
+dependencies = ["mapie==1.4.1", "scikit-learn", "numpy", "pandas", "astropy", "scipy"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
