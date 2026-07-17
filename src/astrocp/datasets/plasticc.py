@@ -18,7 +18,12 @@ import pandas as pd
 
 RAW_LC = "data/raw/plasticc_train_lightcurves.csv.gz"
 RAW_META = "data/raw/plasticc_train_metadata.csv.gz"
-CACHE = "data/processed/plasticc_features.csv.gz"
+_CACHE_DIR = "data/processed"
+
+
+def _cache_path(max_objects: int | None) -> str:
+    tag = "full" if max_objects is None else str(int(max_objects))
+    return os.path.join(_CACHE_DIR, f"plasticc_features_{tag}.csv.gz")
 
 PASSBANDS = 6
 STATS = ["mean", "std", "amp", "slope", "peakmjd", "nobs"]
@@ -59,8 +64,9 @@ def load_plasticc(max_objects: int | None = None, use_cache: bool = True,
 
     Devuelve dict con X (n, n_feat), y (n,) target, feature_names.
     """
-    if use_cache and os.path.exists(CACHE):
-        df = pd.read_csv(CACHE)
+    cache_path = _cache_path(max_objects)
+    if use_cache and os.path.exists(cache_path):
+        df = pd.read_csv(cache_path)
     else:
         meta = pd.read_csv(RAW_META)
         lc = pd.read_csv(RAW_LC)
@@ -80,8 +86,8 @@ def load_plasticc(max_objects: int | None = None, use_cache: bool = True,
             feats["target"] = int(meta.loc[meta["object_id"] == oid, "target"].iloc[0])
             recs.append(feats)
         df = pd.DataFrame(recs)
-        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-        df.to_csv(CACHE, index=False, compression="gzip")
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        df.to_csv(cache_path, index=False, compression="gzip")
 
     y = df["target"].to_numpy(dtype=int)
     feat_cols = [c for c in df.columns if c not in ("object_id", "target")]
