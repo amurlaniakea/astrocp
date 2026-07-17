@@ -112,8 +112,6 @@ def test_guardrail_n_min_clase_delega_a_global(plasticc_forma):
     from mapie.classification import SplitConformalClassifier
     X, y, X_tr, X_te, y_tr, y_te = plasticc_forma
     # subset pequeño para garantizar clase 95 inviable por conteo
-    idx95 = np.where(y_tr == 95)[0]
-    # tomar 1200 objetos del train manteniendo stratificación aproximada
     rng = np.random.RandomState(0)
     take = rng.choice(len(X_tr), 1200, replace=False)
     Xs, ys = X_tr[take], y_tr[take]
