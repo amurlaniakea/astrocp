@@ -8,4 +8,10 @@ dist/
 *.csv
 *.fits
 data/raw/
+data/processed/
 .ipynb_checkpoints/
+# aislamiento: nunca commitear credenciales ni config de Hermes
+.hermes/
+credentials/
+*.key
+.env
