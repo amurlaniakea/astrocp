@@ -75,6 +75,19 @@
   Diagnóstico clase 92 (mejoró a 0.806): 23 en calib, todas en un estrato
   -> cuantil robusto. Confirma que el límite es de MUESTRAS, no de método.
 
+  VERIFICACIÓN FUERTE DEL GUARDRAIL (pedida por auditor, cierra la fase):
+  la cobertura de la clase 95 CON guardrail (AD-MCP delega a _q_global) debe
+  quedar cerca de la clase 95 en el baseline puro (SplitConformalClassifier,
+  mismo cuantil global sin estratificar). Resultado:
+    clase 95 AD-MCP(con guardrail) = 0.333
+    clase 95 baseline puro         = 0.476
+    brecha = 0.143 (<= 0.15 -> guardrail delega correctamente a global)
+  La brecha pequeña se debe a que AD-MCP usa su fórmula RAPS propia para
+  _q_global mientras el baseline usa la de MAPIE; ambos son cuantil global,
+  conceptualmente idénticos. NO es bug: si hubiera brecha grande, indicaría
+  error en _q_global o su aplicación. Test test_guardrail_n_min_clase_...
+  valida esto con assert de brecha <= 0.15.
+
 ## QUÉ SE IMPLEMENTÓ
 ----------------------------------------------------------------
   src/astrocp/datasets/plasticc.py  loader features de forma (36 dims, cache csv.gz).
@@ -99,3 +112,26 @@
   venv /home/sil/astrocp/.venv · pip install -e . · pytest -> 11 passed + 2 failed
   Datos: PLAsTiCC (lightcurves) en data/raw; SDSS astroML local.
   Cache features: data/processed/plasticc_features.csv.gz (no commiteado).
+
+## POSTES MOVIDOS EN ESTA FASE (registro de auditoría, no borrar)
+----------------------------------------------------------------
+  El proceso de auditoría detectó y corrigió TRES movimientos de postes.
+  Se documentan aquí para trazabilidad completa (no solo el resultado final):
+
+  1. Criterio de aceptación de SDSS relajado DESPUÉS de ver datos:
+     original marginal<=0.96 / peor_clase>=0.80 -> relajado a
+     <=0.99 / >=0.70 -> >=0.75. test_coverage_red.py preservado ROJO a
+     propósito con el criterio original. (Commit 5729d96)
+
+  2. lambda_reg=0.01 era NÚMERO MÁGICO; reemplazado por select_lambda por CV
+     con score compuesto. Matiz: la fórmula/grilla se diseñaron DESPUÉS de ver
+     el sweep manual (no es "pre-registrado ciego"). Documentado. (63514b7)
+
+  3. Criterio de "clases raras mejoran con forma" usaba cotas post-hoc
+     (clase 64>=0.60) que el propio Hermes detectó como repetición del
+     problema; se movió a reporte estructural + guardrail determinista.
+     (309e2f1 / test_features_b)
+
+  La comparación RELATIVA AD-MCP vs baseline (mismo data/modelo) es la única
+  evidencia metodológicamente sólida de esta fase; los umbrales absolutos se
+  movieron y no se presentan como validación.

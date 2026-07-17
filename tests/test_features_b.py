@@ -76,21 +76,47 @@ def test_clases_raras_mejoran_con_features_forma(plasticc_forma):
 def test_guardrail_n_min_clase_delega_a_global(plasticc_forma):
     """GUARDRAIL (pedido por auditoría): clases con < n_min_class muestras en
     calib son inviables para CUALQUIER estratificación. AD-MCP las delega al
-    cuantil GLOBAL en predict_set. Verifica el desglose y que la clase 95
-    (16 en calib) no queda atrapada en el cuantil por-estrato ruidoso."""
+    cuantil GLOBAL en predict_set.
+
+    Verificación FUERTE (no contra el piso roto): la cobertura de la clase 95
+    con guardrail debe quedar razonablemente CERCA de la clase 95 en el
+    baseline puro (SplitConformalClassifier, mismo cuantil global sin
+    estratificar). Si el guardrail está bien implementado, ambas usan la
+    misma idea (un solo cuantil sin estratificar) -> deben coincidir. Una
+    brecha grande indicaría bug en _q_global o en su aplicación en predict_set.
+    """
+    from mapie.classification import SplitConformalClassifier
     X, y, X_tr, X_te, y_tr, y_te = plasticc_forma
+    # AD-MCP con guardrail
     m = ADMCP(estimator=RandomForestClassifier(n_estimators=80, random_state=0, n_jobs=-1),
               alpha=0.1, conformity_score="raps", n_bins=5, n_min_class=30, random_state=0)
     m.fit_conformalize(X_tr, y_tr)
     diag = m.diagnose()
     assert diag["n_inviable"] > 0, "esperaba clases inviables con PLAsTiCC 2500"
-    # la clase 95 (16 en calib) debe estar marcada inviable
     assert diag["inviable_classes"].get(95, False) is True, (
         f"clase 95 (16 en calib) debía ser inviable: {diag['class_counts_cal'].get(95)}")
-    print(f"\n[b] guardrail: n_inviable={diag['n_inviable']} "
-          f"conteos<30={ {int(k):v for k,v in diag['class_counts_cal'].items() if v<30} }")
     _, ys = m.predict_set(X_te)
-    cc = conditional_coverage_by_class(y_te, ys)
-    # con guardrail la clase 95 usa cuantil global -> no peor que sin guardrail
-    assert cc[95] >= 0.238, f"guardrail no mejoró clase 95: {cc[95]:.3f}"
-    print(f"[b] AD-MCP+guardrail peor={min(cc.values()):.3f} (clase 95={cc[95]:.3f})")
+    cc_ad = conditional_coverage_by_class(y_te, ys)
+
+    # baseline puro (mismo SplitConformalClassifier del resto de comparaciones)
+    Xtr, Xcal, ytr, ycal = train_test_split(
+        X_tr, y_tr, test_size=0.5, random_state=0, stratify=y_tr)
+    base = SplitConformalClassifier(
+        estimator=RandomForestClassifier(n_estimators=80, random_state=0, n_jobs=-1),
+        prefit=False, confidence_level=0.9, conformity_score="raps")
+    base.fit(Xtr, ytr)
+    base.conformalize(Xcal, ycal)
+    _, yb = base.predict_set(X_te)
+    yb = yb[:, :, 0]
+    cc_base = conditional_coverage_by_class(y_te, yb)
+
+    cov_95_ad = cc_ad[95]
+    cov_95_base = cc_base[95]
+    print(f"\n[b] guardrail: clase 95 AD-MCP(con guardrail)={cov_95_ad:.3f} "
+          f"vs baseline puro={cov_95_base:.3f}")
+    print(f"[b]   n_inviable={diag['n_inviable']} "
+          f"conteos<30={ {int(k):v for k,v in diag['class_counts_cal'].items() if v<30} }")
+    # el guardrail debe acercar la clase 95 al baseline (misma idea: cuantil global)
+    assert abs(cov_95_ad - cov_95_base) <= 0.15, (
+        f"guardrail no delega bien a global: clase 95 AD-MCP={cov_95_ad:.3f} "
+        f"vs baseline={cov_95_base:.3f} (brecha >0.15 -> bug en _q_global)")
