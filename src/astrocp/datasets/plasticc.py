@@ -1,76 +1,92 @@
-"""Loaders de datasets astronómicos reales para astrocp.
+"""Loader PLAsTiCC con features de FORMA de curva de luz (no solo media).
 
-PLAsTiCC (LSST-like transiente classification challenge):
-  - metadata real con 14 clases de transitorios (target)
-  - lightcurves reales (flux por passband)
-Los datos NO se commitean (.gitignore excluye data/raw/).
+PLAsTiCC lightcurves: object_id, mjd, passband(0-5), flux, flux_err,
+detected_bool. Extrae por passband (6 bandas) estadísticos de FORMA:
+  - media, desvío, amplitud (max-min), pendiente (flux vs mjd, poly1),
+    tiempo_al_pico (mjd del flux máximo normalizado), n_obs.
+Son ~6 stats x 6 passbands = 36 features. Esto separa clases que con solo
+media de flujo eran indistinguibles (ver STATUS_HONESTO: límite de features).
+
+Requiere leer las lightcurves (más lento que la metadata). Se cachea en
+data/processed/plasticc_features.parquet si existe.
 """
 from __future__ import annotations
 
-import gzip
-import csv
 import os
 import numpy as np
 import pandas as pd
 
-RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "raw")
-META = os.path.join(RAW_DIR, "plasticc_train_metadata.csv.gz")
-LC = os.path.join(RAW_DIR, "plasticc_train_lightcurves.csv.gz")
+RAW_LC = "data/raw/plasticc_train_lightcurves.csv.gz"
+RAW_META = "data/raw/plasticc_train_metadata.csv.gz"
+CACHE = "data/processed/plasticc_features.csv.gz"
 
-# passbands de PLAsTiCC (u,g,r,i,z,y)
-_PASSBANDS = [0, 1, 2, 3, 4, 5]
+PASSBANDS = 6
+STATS = ["mean", "std", "amp", "slope", "peakmjd", "nobs"]
 
 
-def _features_from_lightcurves(lc_path: str, object_ids) -> dict:
-    """Media de flujo por passband por objeto (feature fija, determinista)."""
-    agg = {oid: {pb: [] for pb in _PASSBANDS} for oid in object_ids}
-    with gzip.open(lc_path, "rt") as f:
-        r = csv.reader(f)
-        next(r)
-        for row in r:
-            oid = int(row[0])
-            if oid not in agg:
-                continue
-            pb = int(float(row[2]))  # columna 2 = passband (0..5)
+def _features_for_object(g: pd.DataFrame) -> dict:
+    row = {}
+    for pb in range(PASSBANDS):
+        sub = g[g["passband"] == pb]
+        f = sub["flux"].to_numpy(dtype=float)
+        t = sub["mjd"].to_numpy(dtype=float)
+        if len(f) == 0:
+            for s in STATS:
+                row[f"pb{pb}_{s}"] = 0.0
+            continue
+        row[f"pb{pb}_mean"] = float(np.mean(f))
+        row[f"pb{pb}_std"] = float(np.std(f)) if len(f) > 1 else 0.0
+        row[f"pb{pb}_amp"] = float(np.ptp(f))  # max - min
+        if len(f) > 1:
+            # pendiente flux vs mjd (poly1)
+            A = np.vstack([t, np.ones_like(t)]).T
             try:
-                flux = float(row[3])  # columna 3 = flux
-            except ValueError:
-                continue
-            agg[oid][pb].append(flux)
-    feats = {}
-    for oid in object_ids:
-        vals = []
-        for pb in _PASSBANDS:
-            arr = agg[oid][pb]
-            vals.append(np.mean(arr) if arr else 0.0)
-        feats[oid] = vals
-    return feats
+                slope, _ = np.linalg.lstsq(A, f, rcond=None)[0]
+            except Exception:
+                slope = 0.0
+            row[f"pb{pb}_slope"] = float(slope)
+            row[f"pb{pb}_peakmjd"] = float(t[np.argmax(f)])  # momento del pico
+        else:
+            row[f"pb{pb}_slope"] = 0.0
+            row[f"pb{pb}_peakmjd"] = float(t[0])
+        row[f"pb{pb}_nobs"] = float(len(f))
+    return row
 
 
-def load_plasticc(max_objects: int | None = None) -> dict:
-    """Carga PLAsTiCC train como dict con X (features), y (clases), ids.
+def load_plasticc(max_objects: int | None = None, use_cache: bool = True,
+                  random_state: int = 0) -> dict:
+    """Carga PLAsTiCC con features de forma de curva de luz.
 
-    Returns
-    -------
-    dict with keys: X (np.ndarray 2D), y (np.ndarray 1D int),
-                    object_id (np.ndarray 1D int), ddf_bool (np.ndarray 1D int)
+    Devuelve dict con X (n, n_feat), y (n,) target, feature_names.
     """
-    if not (os.path.exists(META) and os.path.exists(LC)):
-        raise FileNotFoundError(
-            "Faltan datos PLAsTiCC en data/raw/. Descargar desde Zenodo 2539456 "
-            "(plasticc_train_metadata.csv.gz, plasticc_train_lightcurves.csv.gz)."
-        )
-    meta = pd.read_csv(META)
-    if max_objects is not None:
-        meta = meta.sample(frac=1.0, random_state=0).head(max_objects).reset_index(drop=True)
-    object_ids = meta["object_id"].astype(int).tolist()
-    feats = _features_from_lightcurves(LC, object_ids)
-    X = np.array([feats[oid] for oid in object_ids], dtype=float)
-    y = meta["target"].astype(int).to_numpy()
-    ddf = meta["ddf_bool"].astype(int).to_numpy()
-    return {
-        "X": X,
-        "y": y,
-        "object_id": np.array(object_ids, dtype=int),
-        "ddf_bool": ddf,
-    }
+    if use_cache and os.path.exists(CACHE):
+        df = pd.read_csv(CACHE)
+    else:
+        meta = pd.read_csv(RAW_META)
+        lc = pd.read_csv(RAW_LC)
+        if max_objects is None:
+            objs = meta["object_id"].unique()
+        else:
+            rng = np.random.RandomState(random_state)
+            objs = rng.choice(meta["object_id"].unique(),
+                              min(max_objects, meta["object_id"].nunique()),
+                              replace=False)
+        # agrupar lightcurves por objeto
+        recs = []
+        for oid in objs:
+            g = lc[lc["object_id"] == oid]
+            feats = _features_for_object(g)
+            feats["object_id"] = oid
+            feats["target"] = int(meta.loc[meta["object_id"] == oid, "target"].iloc[0])
+            recs.append(feats)
+        df = pd.DataFrame(recs)
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        df.to_csv(CACHE, index=False, compression="gzip")
+
+    y = df["target"].to_numpy(dtype=int)
+    feat_cols = [c for c in df.columns if c not in ("object_id", "target")]
+    X = df[feat_cols].to_numpy(dtype=float)
+    # limpiar NaN/Inf
+    mask = np.all(np.isfinite(X), axis=1)
+    X, y = X[mask], y[mask]
+    return {"X": X, "y": y, "feature_names": feat_cols}
