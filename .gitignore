@@ -7,7 +7,6 @@ dist/
 .pytest_cache/
 *.csv
 *.fits
-data/raw/
 data/processed/
 .ipynb_checkpoints/
 # aislamiento: nunca commitear credenciales ni config de Hermes
@@ -15,3 +14,6 @@ data/processed/
 credentials/
 *.key
 .env
+# NOTA: data/raw/ (PLAsTiCC Zenodo, ~21MB) SE COMMITEA a propósito para que
+# el clone limpio sea reproducible sin red ni descargas manuales. Es el input
+# real del benchmark; repos científicos (astropy, etc.) lo hacen estándar.
